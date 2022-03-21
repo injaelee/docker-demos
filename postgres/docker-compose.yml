@@ -1,0 +1,68 @@
+version: "3.4"
+# top level section with the 'x-' prefix
+# which is the extension fields
+#
+x-logging: &default-logging
+  options:
+    max-size: "1m"
+    max-file: "10"
+    compress: "true"
+  driver: "json-file"
+
+services:
+
+  # look at setup configuration details on https://hub.docker.com/_/postgres
+  # for more customization
+  db:
+
+    # pick your image version
+    # for this we pick 14 but you can choose one from the available docker
+    # images. see the docker hub page for available images
+    # 
+    image: "postgres:14"
+
+    # anchor value injection 'default-logging' from x-logging
+    logging: *default-logging
+    container_name: "rpx-clio-db"
+
+    ports:
+
+      # {host port}:{container port}
+      # you can connect through 'localhost:54320'
+      # port 5432 is the container port
+      #
+      - "54320:5432"
+
+    volumes:
+      # {host path}:{container path}
+      #
+
+      # this is where the pg data files will end up
+      # specific the container $PGDATA path in environment
+      #
+      - clio_db_data:/var/lib/postgresql/data/clio
+
+      # init build *.sql files go into your relative clio-initdb.d
+      # 'docker-entrypoint-initdb.d' is the container path that
+      # postgres looks for build up *.sql files
+      #
+      - ./clio-initdb.d:/docker-entrypoint-initdb.d
+
+    environment:
+      - PGDATA=/var/lib/postgresql/data/clio
+      - POSTGRES_PASSWORD=clio-passw0rd
+
+      # if you have a specific user use the below.
+      # without the following the default root user is 'postgres'
+      #
+      # -POSTGRES_USER=
+      # -POSTGRES_DB=
+    command: ["postgres", "-c", "log_statement=all"]
+
+volumes:
+
+  # by adding to the top-level volumes
+  # persist through the containers lifecycle even when stopped/removed
+  # remove volume manually using 'docker volume rm'
+  #
+  clio_db_data:
