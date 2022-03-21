@@ -1,3 +1,7 @@
+# Pre-requisite
+## Install Docker
+- https://docs.docker.com/compose/install/
+
 # Execution
 
 ## Bring Up
