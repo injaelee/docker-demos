@@ -1,0 +1,13 @@
+version: "3.4"
+
+services:
+  els:
+    image: "elasticsearch:8.1.2"
+
+    ports:
+      # {host port}:{container port}
+      - 9200:9200
+      - 9300:9300
+
+    environment:
+      - node.name=es01
