@@ -10,85 +10,50 @@ import sys
 from typing import Dict, Any, Set, List
 import json
 
-"""
-gcp.bigquery.dataset.table_name
-
-"""
-#class GCPBigQueryLoggingHandler(logging.Handler):
-#    def __init__(self,
-#        app_name: str,
-#        root_name: str,
-#        host: str,
-#        port: int,
-#        is_mock: bool = False,
-#    ):
-#        super(GCPBigQueryLoggingHandler, self).__init__()
-#
-#        self.root_name = root_name
-#        self.host = host
-#        self.port = port
-#        self.app_name = app_name
-#
-#        # the glue to having child logger names logged
-#        # ie. any suffixes that come after ${root_name}
-#        #     with a '.'(dot) will be logged
-#        self.addFilter(logging.Filter(name=root_name))
-#
-#        self.fluent_logger = sender.FluentSender(
-#            app_name,
-#            host = host,
-#            port = port,
-#        )
-#
-#        self.is_mock = is_mock
-#
-#    def emit(self,
-#        record: logging.LogRecord,
-#    ):
-#        import pdb; pdb.set_trace()
-#        
-#        # OUTPUT per table name 
-#        # dataset.tablename
-#        tag = record.name[len(self.root_name):]
-#
-#        if self.is_mock:
-#            print(tag, record.getMessage())
-#            return
-#
-#        import pdb; pdb.set_trace()
-#        self.fluent_logger.emit(
-#            tag,
-#            json.loads(record.getMessage()),
-#        )
-#
-#    def close(self):
-#        if not self.fluent_logger:
-#            return
-#
-#        self.fluent_logger.close()
-#
-
 class GCPBigQueryLoggingHandler(handler.FluentHandler):
     def __init__(self,
+        root_name: str,
         *args, **kwargs
     ):
-        import pdb; pdb.set_trace()
+        self.root_name = root_name
         handler.FluentHandler.__init__(self, *args, **kwargs)
+
+    def extract_tag_from(self,
+        fullname: str,
+    ) -> str:
+        return fullname[len(self.root_name) + 1:]
 
     def emit(self,
         record: logging.LogRecord,
     ):
-        import pdb; pdb.set_trace()
+        fluent_tag = self.extract_tag_from(record.name)
         data = json.loads(record.getMessage())
-        # data = self.format(record)
         _sender = self.sender
-        return _sender.emit_with_time(None,
+        return _sender.emit_with_time(fluent_tag,
                                       sender.EventTime(record.created)
                                       if _sender.nanosecond_precision
                                       else int(record.created),
                                       data)
 
 class AttributeTypeMappingCollector:
+    """
+    Extracts and aggregates the key, data types pair given dictionaries.
+
+    This is used to find the superset of the key to data types.
+    Hierarchical keys are flatten with dots ".".
+
+    Example) 
+    start_key:
+    |_a_key: v
+    |_b_key: 
+      |_c-key: []
+    
+    Results in:
+      start_key            : <dict>
+      start_key.a_key      : <str>
+      start_key.b_key      : <dict>
+      start_key.b_key.c_key: <list>
+    """
     def __init__(self):
         self.attribute_mapping = {}
 
@@ -310,8 +275,9 @@ def logger_setup(
     fluent_host: str,
     fluent_port: int,
 ):
-    gcp_table_logging_handler = GCPBigQueryLoggingHandler(#GCPBigQueryLoggingHandler(
-        tag = "tag_name_goes_here",
+    # set up the custom logging handler
+    gcp_table_logging_handler = GCPBigQueryLoggingHandler(
+        tag = "gcp.table.prod",
         app_name = "prod.sample-logger-app",
         root_name = "gcp.table", # logger name prefix
         host = fluent_host,
@@ -324,10 +290,7 @@ def logger_setup(
     
     # test snippets
     #
-    not_gcp_logger = logging.getLogger("not.gcp.table")
     gcp_logger = logging.getLogger("gcp.table.the_table_name")
-
-    not_gcp_logger.info("logging to a non GCP table")
 
     structured_message = {
         "id": str(ObjectId()),
