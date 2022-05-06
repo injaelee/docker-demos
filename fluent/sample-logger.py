@@ -1,131 +1,241 @@
 import xrpl
-from fluent import sender
+from fluent import sender, handler
 from bson.objectid import ObjectId
-from xrpl.models.requests import BookOffers
+from xrpl.models.requests import BookOffers, Ledger
+from xrpl.models.transactions import Transaction, OfferCreate, Payment, OfferCancel
 from xrpl.models.currencies import XRP, IssuedCurrency
 import logging
 import datetime
+import sys
+from typing import Dict, Any, Set, List
+import json
 
 """
 gcp.bigquery.dataset.table_name
 
 """
-class GCPBigQueryLoggingHandler(logging.Handler):
+#class GCPBigQueryLoggingHandler(logging.Handler):
+#    def __init__(self,
+#        app_name: str,
+#        root_name: str,
+#        host: str,
+#        port: int,
+#        is_mock: bool = False,
+#    ):
+#        super(GCPBigQueryLoggingHandler, self).__init__()
+#
+#        self.root_name = root_name
+#        self.host = host
+#        self.port = port
+#        self.app_name = app_name
+#
+#        # the glue to having child logger names logged
+#        # ie. any suffixes that come after ${root_name}
+#        #     with a '.'(dot) will be logged
+#        self.addFilter(logging.Filter(name=root_name))
+#
+#        self.fluent_logger = sender.FluentSender(
+#            app_name,
+#            host = host,
+#            port = port,
+#        )
+#
+#        self.is_mock = is_mock
+#
+#    def emit(self,
+#        record: logging.LogRecord,
+#    ):
+#        import pdb; pdb.set_trace()
+#        
+#        # OUTPUT per table name 
+#        # dataset.tablename
+#        tag = record.name[len(self.root_name):]
+#
+#        if self.is_mock:
+#            print(tag, record.getMessage())
+#            return
+#
+#        import pdb; pdb.set_trace()
+#        self.fluent_logger.emit(
+#            tag,
+#            json.loads(record.getMessage()),
+#        )
+#
+#    def close(self):
+#        if not self.fluent_logger:
+#            return
+#
+#        self.fluent_logger.close()
+#
+
+class GCPBigQueryLoggingHandler(handler.FluentHandler):
     def __init__(self,
-        app_name: str,
-        root_name: str,
-        host: str,
-        port: int,
-        is_mock: bool = False,
+        *args, **kwargs
     ):
-        super(GCPBigQueryLoggingHandler, self).__init__()
-
-        self.root_name = root_name
-        self.host = host
-        self.port = port
-        self.app_name = app_name
-
-        # the glue to having child logger names logged
-        # ie. any suffixes that come after ${root_name}
-        #     with a '.'(dot) will be logged
-        self.addFilter(logging.Filter(name=root_name))
-
-        self.fluent_logger = sender.FluentSender(
-            app_name,
-            host = host,
-            port = port,
-        )
-
-        self.is_mock = is_mock
-
-    def _emit(self,
-        record: logging.LogRecord,
-    ):
-        if self.is_mock:
-            print(tag, record.getMessage())
-            return
-
-
+        import pdb; pdb.set_trace()
+        handler.FluentHandler.__init__(self, *args, **kwargs)
 
     def emit(self,
         record: logging.LogRecord,
     ):
-        # OUTPUT per table name 
-        # dataset.tablename
-        tag = record.name[len(self.rootName):]
-        self._emit(
-            tag,
-            record.getMessage(),
+        import pdb; pdb.set_trace()
+        data = json.loads(record.getMessage())
+        # data = self.format(record)
+        _sender = self.sender
+        return _sender.emit_with_time(None,
+                                      sender.EventTime(record.created)
+                                      if _sender.nanosecond_precision
+                                      else int(record.created),
+                                      data)
+
+class AttributeTypeMappingCollector:
+    def __init__(self):
+        self.attribute_mapping = {}
+
+    def get_mapping(self) -> Dict[str, Any]:
+        return self.attribute_mapping
+
+    def collect_attributes(self,
+        data_dict: Dict[str, Any],
+    ):   
+        self._collect_attributes(
+            prefix = "",
+            data_dict = data_dict,
+            attribute_mapping = self.attribute_mapping,
         )
 
-    def close(self):
-        if not self.fluent_logger:
-            return
+    def _collect_attributes(self,
+        prefix: str,
+        data_dict: Dict[str, Any],
+        attribute_mapping: Dict[str, Set[str]],
+    ):
 
-        self.fluent_logger.close()
+        # extract out all the attributes
+        for k, v in data_dict.items():
 
+            attribute_name = prefix + k
 
-def logger_setup(
-    fluent_host: str,
-    fluent_port: int,
-):
-    gcp_table_logging_handler = GCPBigQueryLoggingHandler(
-        root_name = "gcp.table", # logger name prefix
-        host = fluent_host,
-        port = fluent_port,
-    )
-    gcp_table_logger = logging.getLogger("gcp.table")
-    gcp_table_logger.propagate = False
-    gcp_table_logger.setLevel("INFO")
+            if type(v) == dict:
+                self._collect_attributes(
+                    prefix = attribute_name + ".",
+                    data_dict = v,
+                    attribute_mapping = attribute_mapping,
+                )
 
-    gcp_table_logger.addHandler(gcp_table_logging_handler)
-    
+            # assumption: there is no list of lists
+            if type(v) == list:
+                for entry in v:
+                    if type(entry) == dict:
+                        self._collect_attributes(
+                            prefix = attribute_name + ".",
+                            data_dict = entry,
+                            attribute_mapping = attribute_mapping,
+                        )
 
-    # test snippets
-    #
-    not_gcp_logger = logging.getLogger("not.gcp.table")
-    gcp_logger = logging.getLogger("gcp.table.the_table_name")
-
-    not_gcp_logger.info("logging to a non GCP table")
-
-    structured_message = {
-        "id": str(ObjectId()),
-        "value": "Some value again.",
-    }
-    gcp_logger.info(structured_message)
+            if not attribute_mapping.get(attribute_name):
+                attribute_mapping[attribute_name] = set()
+            attribute_mapping[attribute_name].add(type(v))
 
 
-def logging_book_offers():
-    wallet_address = "r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59"
-    print(XRP())
-    issued_currency = IssuedCurrency(
-        currency = "USD",
-        issuer = "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B",
-    )
-    book_offer_request = BookOffers(
-        taker = wallet_address,
-        taker_gets = XRP(),
-        taker_pays = issued_currency,
-        ledger_index = "validated", # only get the validated data
-    )
-    print(book_offer_request)
+class XRPLAPIDemo:
+    def __init__(self,
+        xrpl_endpoint: str = "http://s1.ripple.com:51234/",
+    ):
+        self.xrpl_client = xrpl.clients.JsonRpcClient(xrpl_endpoint)
 
-    xrpl_client = xrpl.clients.JsonRpcClient("http://s1.ripple.com:51234/")
-    r = xrpl_client.request(book_offer_request)
-    print(r)
-    """
-    response = await client.request(
-            BookOffers(
-                taker = WALLET.classic_address,
-                taker_gets = XRP(),
-                taker_pays = IssuedCurrency(
-                    currency = "USD",
-                    issuer = "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B",
-                ),
-                ledger_index = "validated",
-            ),
+    def flatten_transaction_attribute_keys(self,
+        ledger_indices: List[int],
+    ):
+        attribute_collector = AttributeTypeMappingCollector()
+        for idx in ledger_indices:
+            ledger_request = Ledger(
+                ledger_index = idx,
+                transactions = True, # include the individual transaction entries
+                expand = True, # expand the transaction entries into actual data instead of references
+            )
+
+            # obtain the latest ledger index
+            resp = self.xrpl_client.request(ledger_request)
+            list_of_txns = resp.result.get("ledger", {}).get("transactions", [])    
+
+            for txn in list_of_txns:
+
+                txn_hash = txn.get("hash")
+                del txn["hash"] # remove the hash key so we can convert back to an object
+
+                # da_class = getattr(xrpl_models_txns_module, txn.get("TransactionType"))
+                # o = da_class.from_xrpl(txn)
+                # o = Transaction.from_xrpl(txn)
+                # print(o)
+
+                attribute_collector.collect_attributes(data_dict = txn)
+        
+        attribute_mapping = attribute_collector.get_mapping()
+        for k in sorted(attribute_mapping.keys()):
+            v = attribute_mapping.get(k)
+            print("{key}\t{value}".format(key = k, value = v))
+
+    def logging_ledger_info(self):
+        """
+        
+        """
+        ledger_request = Ledger(
+            ledger_index = "current",
+            transactions = True, # include the individual transaction entries
+            expand = True, # expand the transaction entries into actual data instead of references
         )
-    """
+
+        # obtain the latest ledger index
+        resp = self.xrpl_client.request(ledger_request)
+        list_of_txns = resp.result.get("ledger", {}).get("transactions", [])
+
+        attribute_collector = AttributeTypeMappingCollector()
+        for txn in list_of_txns:
+
+            #print(json.dumps(txn, indent = 2))
+            #tx = Transaction.from_xrpl(txn)
+            print(txn.get("TransactionType", "N/A"))
+
+            txn_hash = txn.get("hash")
+            del txn["hash"] # remove the hash key so we can convert back to an object
+
+            #da_class = getattr(xrpl_models_txns_module, txn.get("TransactionType"))
+            # o = da_class.from_xrpl(txn)
+            o = Transaction.from_xrpl(txn)
+            print(o)
+
+            attribute_collector.collect_attributes(data_dict = txn)
+            
+        for k, v in attribute_collector.get_mapping().items():
+            print("{key}\t{value}".format(key = k, value = v))
+
+
+    def logging_book_offers(self):
+        wallet_address = "r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59"
+        issued_currency = IssuedCurrency(
+            currency = "USD",
+            issuer = "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B",
+        )
+        book_offer_request = BookOffers(
+            taker = wallet_address,
+            taker_gets = XRP(),
+            taker_pays = issued_currency,
+            ledger_index = "validated", # only get the validated data
+        )
+
+        resp = self.xrpl_client.request(book_offer_request)
+        list_of_offers = resp.result.get("offers")
+        attribute_collector = AttributeTypeMappingCollector()
+        gcp_logger = logging.getLogger("gcp.table.integration_testing_book_offers")
+        for offer in list_of_offers:
+            attribute_collector.collect_attributes(data_dict = offer)
+            gcp_logger.info(json.dumps(offer))
+
+        attribute_mapping = attribute_collector.get_mapping()
+        for k in sorted(attribute_mapping.keys()):
+            v = attribute_mapping.get(k)
+            print("{key}\t{value}".format(key = k, value = v))
+
 
 def snippet_logging_illustration():
     """
@@ -196,11 +306,72 @@ def snippet_logging_illustration():
     logger.close()
 
 
+def logger_setup(
+    fluent_host: str,
+    fluent_port: int,
+):
+    gcp_table_logging_handler = GCPBigQueryLoggingHandler(#GCPBigQueryLoggingHandler(
+        tag = "tag_name_goes_here",
+        app_name = "prod.sample-logger-app",
+        root_name = "gcp.table", # logger name prefix
+        host = fluent_host,
+        port = fluent_port,
+    )
+    gcp_table_logger = logging.getLogger("gcp.table")
+    gcp_table_logger.propagate = False
+    gcp_table_logger.setLevel("INFO")
+    gcp_table_logger.addHandler(gcp_table_logging_handler)
+    
+    # test snippets
+    #
+    not_gcp_logger = logging.getLogger("not.gcp.table")
+    gcp_logger = logging.getLogger("gcp.table.the_table_name")
+
+    not_gcp_logger.info("logging to a non GCP table")
+
+    structured_message = {
+        "id": str(ObjectId()),
+        "value": "Some value again.",
+    }
+    gcp_logger.info(json.dumps(structured_message))
+
+
 if __name__ == "__main__":
-    snippet_logging_illustration()
+    #snippet_logging_illustration()
+
+    logger_setup(
+        fluent_host = "0.0.0.0",
+        fluent_port = 14225,
+    )
+
+    xrpl_demo = XRPLAPIDemo()
+    #xrpl_demo.logging_ledger_info()
+    """
+    xrpl_demo.flatten_transaction_attribute_keys(
+        ledger_indices = [
+          64936667,
+          66462465,
+          67188499,
+          67790714,
+          67849217,
+          68828932,
+          69389950,
+          70328420,
+          71327762,
+          71381966,
+          71428164,
+          71442176,
+          71450035,
+          71452002,
+          71453810,
+          71453880,
+          71453978,
+          71453986,
+          71454001,
+        ]
+    )
+    """
+
     #logging_integration()
-    #logging_book_offers()
-    #logger_setup(
-    #    fluent_host = "0.0.0.0",
-    #    fluent_port = 14225,
-    #)
+    xrpl_demo.logging_book_offers()
+    #snippet_logging_illustration()
