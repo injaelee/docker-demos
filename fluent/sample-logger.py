@@ -101,6 +101,16 @@ class AttributeTypeMappingCollector:
                 attribute_mapping[attribute_name] = set()
             attribute_mapping[attribute_name].add(type(v))
 
+    def print(self,
+        delimeter = "\t",
+    ):
+        for k in sorted(self.attribute_mapping.keys()):
+            v = self.attribute_mapping.get(k)
+            print("{key}{delimeter}{value}".format(
+                key = k, 
+                delimeter = delimeter,
+                value = v,
+            ))
 
 class XRPLAPIDemo:
     def __init__(self,
@@ -135,11 +145,8 @@ class XRPLAPIDemo:
 
                 attribute_collector.collect_attributes(data_dict = txn)
         
-        attribute_mapping = attribute_collector.get_mapping()
-        for k in sorted(attribute_mapping.keys()):
-            v = attribute_mapping.get(k)
-            print("{key}\t{value}".format(key = k, value = v))
-
+        attribute_collector.print()
+        
     def logging_ledger_info(self):
         """
         
@@ -171,8 +178,7 @@ class XRPLAPIDemo:
 
             attribute_collector.collect_attributes(data_dict = txn)
             
-        for k, v in attribute_collector.get_mapping().items():
-            print("{key}\t{value}".format(key = k, value = v))
+        attribute_collector.print()
 
 
     def logging_book_offers(self):
@@ -196,10 +202,18 @@ class XRPLAPIDemo:
             attribute_collector.collect_attributes(data_dict = offer)
             gcp_logger.info(json.dumps(offer))
 
-        attribute_mapping = attribute_collector.get_mapping()
-        for k in sorted(attribute_mapping.keys()):
-            v = attribute_mapping.get(k)
-            print("{key}\t{value}".format(key = k, value = v))
+        attribute_collector.print()
+
+    def demo_ledger_websocket(self):
+        from xrpl.clients import WebsocketClient
+        url = "wss://s1.ripple.com/"
+        from xrpl.models.requests import Subscribe, StreamParameter
+        req = Subscribe(streams=[StreamParameter.LEDGER])
+        # NOTE: this code will run forever without a timeout, until the process is killed
+        with WebsocketClient(url) as client:
+            client.send(req)
+            for message in client:
+                print(message)
 
 
 def snippet_logging_illustration():
@@ -309,7 +323,7 @@ if __name__ == "__main__":
 
     xrpl_demo = XRPLAPIDemo()
     #xrpl_demo.logging_ledger_info()
-    """
+    
     xrpl_demo.flatten_transaction_attribute_keys(
         ledger_indices = [
           64936667,
@@ -333,8 +347,9 @@ if __name__ == "__main__":
           71454001,
         ]
     )
-    """
+    
 
     #logging_integration()
-    xrpl_demo.logging_book_offers()
+    #xrpl_demo.logging_book_offers()
+    xrpl_demo.demo_ledger_websocket()
     #snippet_logging_illustration()
