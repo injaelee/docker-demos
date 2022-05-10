@@ -54,11 +54,33 @@ class AttributeTypeMappingCollector:
       start_key.b_key      : <dict>
       start_key.b_key.c_key: <list>
     """
-    def __init__(self):
+    def __init__(self,
+        data_type_mapping: str = None,
+    ):
         self.attribute_mapping = {}
+        self.data_type_mapping = data_type_mapping
+
+        # setup BigQuery Data Type
+        self.bigquery_data_type_mapping = {
+            int: "INTEGER",
+            str: "STRING",
+            dict: "RECORD",
+        }
 
     def get_mapping(self) -> Dict[str, Any]:
         return self.attribute_mapping
+
+    def _data_type_translation(self,
+        data_type,
+    ):
+        if self.data_type_mapping == "google":
+            return self.bigquery_data_type_mapping.get(
+                data_type, 
+                "NOT FOUND:[{}]".format(data_type),
+            )
+
+        return data_type
+
 
     def collect_attributes(self,
         data_dict: Dict[str, Any],
@@ -99,7 +121,9 @@ class AttributeTypeMappingCollector:
 
             if not attribute_mapping.get(attribute_name):
                 attribute_mapping[attribute_name] = set()
-            attribute_mapping[attribute_name].add(type(v))
+
+            data_type = self._data_type_translation(type(v))
+            attribute_mapping[attribute_name].add(data_type)
 
     def print(self,
         delimeter = "\t",
@@ -121,7 +145,9 @@ class XRPLAPIDemo:
     def flatten_transaction_attribute_keys(self,
         ledger_indices: List[int],
     ):
-        attribute_collector = AttributeTypeMappingCollector()
+        attribute_collector = AttributeTypeMappingCollector(
+            data_type_mapping = "google",
+        )
         for idx in ledger_indices:
             ledger_request = Ledger(
                 ledger_index = idx,
@@ -351,5 +377,5 @@ if __name__ == "__main__":
 
     #logging_integration()
     #xrpl_demo.logging_book_offers()
-    xrpl_demo.demo_ledger_websocket()
+    #xrpl_demo.demo_ledger_websocket()
     #snippet_logging_illustration()
