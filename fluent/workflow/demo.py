@@ -225,8 +225,23 @@ async def main(
     await asyncio.wait(tasks)
 
 
+import json
+async def try_ledger_data():
+    from xrpl.clients import WebsocketClient
+    url = "wss://s1.ripple.com/"
+    from xrpl.models.requests.ledger_data import LedgerData
+    req = LedgerData()
+    # NOTE: this code will run forever without a timeout, until the process is killed
+    with WebsocketClient(url) as client:
+        client.send(req)
+        for message in client:
+            print(json.dumps(message, indent=3))
+
 if __name__ == "__main__":
     
+    asyncio.run(try_ledger_data())
+
+
     logger_setup(
         fluent_host = "0.0.0.0",
         fluent_port = 14225,
