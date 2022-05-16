@@ -146,7 +146,7 @@ class XRPLAPIDemo:
         ledger_indices: List[int],
     ):
         attribute_collector = AttributeTypeMappingCollector(
-            data_type_mapping = "google",
+            #data_type_mapping = "google",
         )
         for idx in ledger_indices:
             ledger_request = Ledger(
