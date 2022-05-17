@@ -1,11 +1,14 @@
 from collections import namedtuple
-from schema import XRPLTransactionSchema, XRPLObjectSchema
+from schema import XRPLObjectSchema
 from typing import Dict, Any
 import copy
 import logging
 import unittest
+from fluent import sender
+
 
 logger = logging.getLogger(__name__)
+
 
 class Validator:
 
@@ -27,28 +30,26 @@ class Ingestor:
 
     def ingest(self,
         data_entry: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        return data_entry
+    ) -> bool:
+        return True
 
 
-class ETLProcessor:
-
+class ETLProcessorTemplate:
     def __init__(self,
-        validator,
-        transformer,
-        injestor,
+        validator: Validator,
+        transformer: Transformer,
+        ingestor: Ingestor,
     ):
-        pass
+        self.validator = validator
+        self.transformer = transformer
+        self.ingestor = ingestor
 
     def process(self,
         data_entry: Dict[str, Any],
-    ):
-        
-        validated_entry = self.validator(data_entry)
-
-        transformed_entry = self.transformer.transform(data_entry)
-
-        self.injestor.injest(transformed_entry)
+    ) -> bool:
+        validated_entry = self.validator.validate(data_entry)
+        transformed_entry = self.transformer.transform(validated_entry)
+        return self.ingestor.ingest(transformed_entry)
 
 
 class GenericValidator(Validator):
@@ -228,6 +229,38 @@ class XRPLTransactionTransformer(Transformer):
         return working_data_entry
 
 
+class FluentIngestor(Ingestor):
+    def __init__(self,
+        fluent_sender: sender.FluentSender,
+        tag_name: str,
+    ):
+        self.fluent_sender = fluent_sender
+        self.tag_name = tag_name
+
+    def ingest(self,
+        data_entry: Dict[str, Any],
+    ) -> bool:
+        r = self.fluent_sender.emit(
+            self.tag_name,
+            data_entry,
+        )
+        # if there is a 'r', there was an error
+        if r:
+            # check out the error
+            logger.error(r)
+            return False
+
+        return True
+
+
+class STDOUTIngestor(Ingestor):
+    def ingest(self,
+        data_entry: Dict[str, Any],
+    ) -> bool:
+        print(data_entry)
+        return True
+
+
 class ProcessorUnitTests(unittest.TestCase):
 
     def test_validator_ledgerobj(self):
@@ -346,10 +379,6 @@ class ProcessorUnitTests(unittest.TestCase):
         }  }
         transformer = XRPLTransactionTransformer()
         transformed_dict = transformer.transform(test_dict)
-
-        #print(transformed_dict)
-        import json
-        print(json.dumps(transformed_dict, indent = 4))
 
 
 if __name__ == "__main__":
