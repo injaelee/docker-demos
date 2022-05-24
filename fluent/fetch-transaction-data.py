@@ -52,25 +52,27 @@ class PaymentFetchProcessor(FetchProcessor):
         **kwargs,
     ):
         
-        if entry.get("TransactionType") == "Payment":
-            offer_count = 1
-            path_size = 0
+        if entry.get("TransactionType") != "Payment":
+            return
 
-            step_sizes = []
-            for path in entry.get("Paths", []):
-                path_size += 1
-                step_sizes.append(str(len(path)))
+        offer_count = 1
+        path_size = 0
 
-            for affected_node in entry.get("metaData", {}).get("AffectedNodes", []):
-                if affected_node.get("ModifiedNode", {}).get("LedgerEntryType") == "Offer":
-                    offer_count += 1
+        step_sizes = []
+        for path in entry.get("Paths", []):
+            path_size += 1
+            step_sizes.append(str(len(path)))
 
-            ledger_index = kwargs.get("ledger_index")
-            txn_hash = entry.get("hash")
+        for affected_node in entry.get("metaData", {}).get("AffectedNodes", []):
+            if affected_node.get("ModifiedNode", {}).get("LedgerEntryType") == "Offer":
+                offer_count += 1
 
-            step_sizes_str = "|" + "\t".join(step_sizes) if len(step_sizes) > 0 else ""
-            self.data_collector.collect(
-                f"{ledger_index}\t{txn_hash}\t{path_size}\t{offer_count}{step_sizes_str}")
+        ledger_index = kwargs.get("ledger_index")
+        txn_hash = entry.get("hash")
+
+        step_sizes_str = "|" + "\t".join(step_sizes) if len(step_sizes) > 0 else ""
+        self.data_collector.collect(
+            f"{ledger_index}\t{txn_hash}\t{path_size}\t{offer_count}{step_sizes_str}")
 
 
 class OutputQueueProcessor:
