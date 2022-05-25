@@ -358,23 +358,74 @@ class ProcessorUnitTests(unittest.TestCase):
             )
 
     def test_transformer_txns(self):
+        """
+            "Amount": {str, dict},
+            "SendMax": {str, dict},
+            "TakerGets": {str, dict},
+            "TakerPays": {str, dict},
+            "metaData.AffectedNodes.CreatedNode.NewFields.Balance": {str, dict},
+            "metaData.AffectedNodes.CreatedNode.NewFields.TakerGets": {str, dict},
+            "metaData.AffectedNodes.CreatedNode.NewFields.TakerPays": {str, dict},
+            "metaData.AffectedNodes.DeletedNode.FinalFields.Balance": {str, dict},
+            "metaData.AffectedNodes.DeletedNode.FinalFields.TakerGets": {str, dict},
+            "metaData.AffectedNodes.DeletedNode.FinalFields.TakerPays": {str, dict},
+            "metaData.AffectedNodes.DeletedNode.PreviousFields.TakerGets": {str, dict},
+            "metaData.AffectedNodes.DeletedNode.PreviousFields.TakerPays": {str, dict},
+            "metaData.AffectedNodes.ModifiedNode.FinalFields.Balance": {str, dict},
+            "metaData.AffectedNodes.ModifiedNode.FinalFields.TakerGets": {str, dict},
+            "metaData.AffectedNodes.ModifiedNode.FinalFields.TakerPays": {str, dict},
+            "metaData.AffectedNodes.ModifiedNode.PreviousFields.Balance": {str, dict},
+            "metaData.AffectedNodes.ModifiedNode.PreviousFields.TakerGets": {str, dict},
+            "metaData.AffectedNodes.ModifiedNode.PreviousFields.TakerPays": {str, dict},
+            "metaData.DeliveredAmount": {str, dict},
+            "metaData.delivered_amount": {str, dict},
+        """
         test_dict = {
+            "Amount": "100",
+            "SendMax":  {
+                "currency": "XRP",
+                "issuer": "NoChange",
+                "value": "200"
+            },
+            "TakerGets": "300",
+            "TakerPays": "400",
             "metaData": {
                 "AffectedNodes": [
                     {
                         "ModifiedNode": {
-                          "FinalFields": {
-                            "Balance": "203412878",
-                          },
-                          "LedgerEntryType": "AccountRoot",
-                          "LedgerIndex": "9810BE74435EB83B313E6B5C6E475CF5CAA3A0BED92AA9BD7706A6ADAB0260EA",
-                          "PreviousFields": {
-                            "Balance": "203412898",
-                          },
-                          "PreviousTxnID": "136C6C3FD366160B89A11601133E70908ADE17B4EA69A6E9E2DC6865486AEE84",
-                          "PreviousTxnLgrSeq": 71698271
+                            "FinalFields": {
+                                "Balance": "100100",
+                            },
+                            "LedgerEntryType": "Type",
+                            "LedgerIndex": "AAAAA",
+                            "PreviousFields": {
+                                "Balance": "100000",
+                            },
+                            "PreviousTxnID": "AAAAA",
+                            "PreviousTxnLgrSeq": 71698271
                         }
-                      },
+                    },{
+                        "DeletedNode": {
+                            "FinalFields": {
+                                "Balance": "100100",
+                            },
+                            "LedgerEntryType": "Type",
+                            "LedgerIndex": "AAAAA",
+                            "PreviousFields": {
+                                "Balance": "100000",
+                            },
+                            "PreviousTxnID": "AAAAA",
+                            "PreviousTxnLgrSeq": 71698271
+                        }
+                    },{
+                        "CreatedNode": {
+                            "NewFields": {
+                                "Balance": "400100",
+                                "TakerGets": "400200",
+                                "TakerPays": "400300",
+                            },
+                        }
+                    }
                 ]
         }  }
         transformer = XRPLTransactionTransformer()

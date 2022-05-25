@@ -41,6 +41,13 @@ class OutputQueueDataCollector(DataCollector):
         self.entry_queue.put(data)
 
 
+class STDOutDataCollector(DataCollector):
+    def collect(self,
+        data: str,
+    ):
+        print(data)
+
+
 class PaymentFetchProcessor(FetchProcessor):
     def __init__(self,
         data_collector: DataCollector,
@@ -198,9 +205,29 @@ class TestIterator(unittest.TestCase):
         for i in range(20):
             print(next(itr))
 
+
 def start_ledger_sequence() -> int:
     client = JsonRpcClient("https://s2.ripple.com:51234/")
     return get_latest_validated_ledger_sequence(client) - 1
+
+
+def single_threaded_start():
+    start_ladger_index = start_ledger_sequence()
+    ledger_index_iter = ShardedLedgerIndexIterator(
+        start_index = start_ladger_index,
+        shard_index = 0,
+        shard_size = 1,
+    )
+    output_collector = STDOutDataCollector()    
+    pymnt_fetch_processor = PaymentFetchProcessor(output_collector)
+    fetch_processors = [pymnt_fetch_processor]
+
+    xrpl_fetcher = XRPLedgerFetcher(url = "wss://s2.ripple.com/")
+    xrpl_fetcher.start_fetch(
+        ledger_index_iter,
+        fetch_processors,
+    )
+
 
 def start_processors():
     # 71840265 has the "Paths"
@@ -211,7 +238,8 @@ def start_processors():
     output_queue = queue.Queue()
     output_collector = OutputQueueDataCollector(output_queue)
 
-    fetch_processors = [PaymentFetchProcessor(output_collector)]
+    pymnt_fetch_processor = PaymentFetchProcessor(output_collector)
+    fetch_processors = [pymnt_fetch_processor]
 
     fetcher_threads = []
     for i in range(shard_size):
@@ -244,5 +272,6 @@ def start_processors():
 
 
 if __name__ == "__main__":
-    start_processors()
+    #start_processors()
+    single_threaded_start()
     #unittest.main()
