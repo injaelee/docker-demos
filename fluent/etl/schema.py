@@ -1,5 +1,6 @@
 class XRPLTransactionSchema:
     SCHEMA = {
+        "_ExecutionID": {str}, # to note custom export execution
         "Account": {str},
         "Amendment": {str},
         "Amount": {str, dict},
@@ -314,6 +315,8 @@ class XRPLTransactionSchema:
 
 class XRPLObjectSchema:
     SCHEMA = {
+        "_ExecutionID": {str}, # to note custom export execution
+        "_LedgerIndex": {int}, # denormalized to note which ledger index 
         "Account": {str},
         "AccountTxnID": {str},
         "Amendments": {list},

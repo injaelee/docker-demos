@@ -257,7 +257,8 @@ class FluentIngestor(Ingestor):
         # if there is a 'r', there was an error
         if not r:
             # check out the error
-            logger.error(r)
+            logger.error(self.fluent_sender.last_error)
+            self.fluent_sender.clear_last_error()
             return False
 
         return True

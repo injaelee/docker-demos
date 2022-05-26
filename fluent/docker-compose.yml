@@ -13,7 +13,7 @@ services:
       #
       - "24224:24224"
       - "14224:14224"
-      - "14225:14225"
+      - "25225:25225"
 
     volumes:
       # point the current config to the container config

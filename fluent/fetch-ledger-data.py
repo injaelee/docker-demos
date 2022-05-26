@@ -1,4 +1,5 @@
 import argparse
+import bson
 from attributes.collector import AttributeTypeMappingCollector
 from collections import namedtuple
 from etl.processor import \
@@ -6,8 +7,10 @@ from etl.processor import \
     STDOUTIngestor, FluentIngestor
 from etl.schema import XRPLObjectSchema
 from fluent import sender
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 from xrpl.clients import WebsocketClient
+from xrpl.clients.json_rpc_client import JsonRpcClient
+from xrpl.ledger import get_latest_validated_ledger_sequence
 from xrpl.models.requests.ledger_data import LedgerData
 import asyncio
 import json
@@ -26,15 +29,21 @@ class XRPLedgerObjectFetcher:
     def __init__(self,
         url: str,
         processor: DictEntryProcessor,
+        is_attach_execution_id: bool = True,
+        ledger_index: Union[int,str] = "current",
     ):
         self.url = url
         self.processor = processor
+        self.is_attach_execution_id = is_attach_execution_id
+        self.execution_id = str(bson.ObjectId())
+
+        self.ledger_index = ledger_index
 
     def start(self):
         with WebsocketClient(self.url) as client:
 
             req = LedgerData(
-                ledger_index = "current",
+                ledger_index = self.ledger_index,
             )
             itr_num = 0
             while req: # while there is a request keep fetching
@@ -53,6 +62,9 @@ class XRPLedgerObjectFetcher:
 
                 list_of_ledger_objs = message.get('state')
                 for obj in list_of_ledger_objs:
+                    if self.is_attach_execution_id:
+                        obj['_ExecutionID'] = self.execution_id
+                        obj['_LedgerIndex'] = int(current_ledger_index)
                     self.processor.process(obj)
 
                 if not current_marker:
@@ -61,6 +73,7 @@ class XRPLedgerObjectFetcher:
                     self.processor.done(
                         ledger_index = current_ledger_index,
                     )
+                    continue
 
                 req = LedgerData(
                     ledger_index = current_ledger_index,
@@ -187,7 +200,8 @@ def start_processors(
 
     xrpl_fetcher = XRPLedgerObjectFetcher(
         url = wss_url,
-        processor = enqueue_fetch_processor
+        processor = enqueue_fetch_processor,
+        ledger_index = start_ledger_sequence(),
     )
     fetcher_thread = threading.Thread(
         target = xrpl_fetcher.start,
@@ -208,6 +222,11 @@ def start_processors(
 
     fetcher_thread.join()
     processor_thread.join()
+
+
+def start_ledger_sequence() -> int:
+    client = JsonRpcClient("https://s2.ripple.com:51234/")
+    return get_latest_validated_ledger_sequence(client) - 1
 
 
 def setup_stdout_logging():
@@ -244,7 +263,7 @@ def main():
         "--xrpl_host",
         help = "specify the rippled websocket host",
         type = str,
-        default = "s2.ripple.com",
+        default = "s1.ripple.com",
     )
     arg_parser.add_argument(
         "-xp",
@@ -306,5 +325,15 @@ def main():
     )
 
 if __name__ == "__main__":
-    #start_processors()
+    """
+    # Common Ledger Data Operations
+    ```bash
+    python fetch-ledger-data.py -v -tag ledger_objects -env local \
+    -xh s1.ripple.com -xp 443 \
+    --fluent --fluent_host 0.0.0.0 --fluent_port 15225
+
+    python fetch-ledger-data.py -v -tag ledger_objects -env local \
+    -xh s1.ripple.com -xp 443
+    ```
+    """
     main()
