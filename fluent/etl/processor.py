@@ -34,7 +34,17 @@ class Ingestor:
         return True
 
 
-class ETLProcessorTemplate:
+class DictEntryProcessor:
+    def process(self,
+        entry: Dict[str, Any]
+    ):
+        pass
+
+    def done(self):
+        pass
+
+
+class ETLTemplateDictEntryProcessor(DictEntryProcessor):
     def __init__(self,
         validator: Validator,
         transformer: Transformer,
@@ -245,7 +255,7 @@ class FluentIngestor(Ingestor):
             data_entry,
         )
         # if there is a 'r', there was an error
-        if r:
+        if not r:
             # check out the error
             logger.error(r)
             return False
