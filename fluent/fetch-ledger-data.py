@@ -7,7 +7,7 @@ from etl.processor import \
     STDOUTIngestor, FluentIngestor
 from etl.schema import XRPLObjectSchema
 from fluent import sender
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Set, Union
 from xrpl.clients import WebsocketClient
 from xrpl.clients.json_rpc_client import JsonRpcClient
 from xrpl.ledger import get_latest_validated_ledger_sequence
@@ -30,13 +30,16 @@ class XRPLedgerObjectFetcher:
         url: str,
         processor: DictEntryProcessor,
         is_attach_execution_id: bool = True,
+        is_attach_seq: bool = True,
         ledger_index: Union[int,str] = "current",
     ):
         self.url = url
         self.processor = processor
         self.is_attach_execution_id = is_attach_execution_id
-        self.execution_id = str(bson.ObjectId())
+        self.is_attach_seq = is_attach_seq
+        self.sequence = 0
 
+        self.execution_id = str(bson.ObjectId())
         self.ledger_index = ledger_index
 
     def start(self):
@@ -62,9 +65,15 @@ class XRPLedgerObjectFetcher:
 
                 list_of_ledger_objs = message.get('state')
                 for obj in list_of_ledger_objs:
+                    obj['_LedgerIndex'] = int(current_ledger_index)
+
                     if self.is_attach_execution_id:
                         obj['_ExecutionID'] = self.execution_id
-                        obj['_LedgerIndex'] = int(current_ledger_index)
+
+                    if self.is_attach_seq:
+                        obj['_Sequence'] = self.sequence
+                        self.sequence += 1
+
                     self.processor.process(obj)
 
                 if not current_marker:
@@ -102,17 +111,26 @@ class EnqueueDictEntryProcessor(DictEntryProcessor):
 
 
 class DataAttributeMappingEntryProcessor(DictEntryProcessor):
-    def __init__(self):
-        self.att_mapping_collector = AttributeTypeMappingCollector()
+    def __init__(self,
+        init_attribute_mapping: Dict[str, Set[str]] = None,
+    ):
+        self.att_mapping_collector = AttributeTypeMappingCollector(
+            init_attribute_mapping = init_attribute_mapping,
+        )
+        self.latest_key_count = len(self.att_mapping_collector.get_keys())
 
     def process(self,
         entry: Dict[str, Any]
     ):
         self.att_mapping_collector.collect_attributes(entry)
 
+        # print when a difference is detected
+        if self.latest_key_count != len(self.att_mapping_collector.get_keys()):
+            self.att_mapping_collector.print()
+
     def done(self, **kwargs):
-        # at the end, print the mapping collector to STDOUT
-        self.att_mapping_collector.print()
+        # do none
+        pass
 
 
 class AggregateDictEntryProcessor(DictEntryProcessor):
@@ -167,19 +185,25 @@ def start_processors(
     wss_url: str,
     fluent_sender: sender.FluentSender,
     fluent_tag_name: str,
+    buffer_size: int,
 ):
 
+    # if fluent sender is specified
+    # forward outputs to fluent
     if fluent_sender:
         ingestor = FluentIngestor(
             fluent_sender = fluent_sender,
             tag_name = fluent_tag_name,
         )
     else:
+        # otherwise, output to STDOUT
         ingestor = STDOUTIngestor()
 
 
     type_mapping_collector = AttributeTypeMappingCollector()
-    att_mapping_entry_processor = DataAttributeMappingEntryProcessor()
+    att_mapping_entry_processor = DataAttributeMappingEntryProcessor(
+        init_attribute_mapping = XRPLObjectSchema.SCHEMA,
+    )
 
     etl_template_processor = ETLTemplateDictEntryProcessor(
         validator = GenericValidator(XRPLObjectSchema.SCHEMA),
@@ -194,7 +218,7 @@ def start_processors(
         ]
     )
 
-    q = queue.Queue()
+    q = queue.Queue(maxsize = buffer_size)
 
     enqueue_fetch_processor = EnqueueDictEntryProcessor(entry_queue = q)
 
@@ -291,6 +315,13 @@ def main():
         type = str,
         default = "ledger_objects",
     )
+    arg_parser.add_argument(
+        "-buf",
+        "--buffer",
+        help = "specify the buffer rows",
+        type = int,
+        default = 10000,
+    )
     cli_args = arg_parser.parse_args()
 
     if cli_args.verbose:
@@ -307,13 +338,14 @@ def main():
     wss_url = f"wss://%s:%s/" % (cli_args.xrpl_host, cli_args.xrpl_port)
 
     logger.info(
-        "Starting processors with WSS '%s' and On?[%r] FluentSender[%s:%d](env:'%s':tag:'%s') ",
+        "Starting processors with WSS '%s' and On?[%r] FluentSender[%s:%d](env:'%s':tag:'%s') ; buffer rows:[%d]",
         wss_url,
         cli_args.fluent,
         cli_args.fluent_host,
         cli_args.fluent_port,
         cli_args.environment,
         cli_args.tagname,
+        cli_args.buffer,
     )
 
     time.sleep(2)
@@ -322,6 +354,7 @@ def main():
         wss_url = wss_url,
         fluent_sender = fluent_sender,
         fluent_tag_name = cli_args.tagname,
+        buffer_size = cli_args.buffer,
     )
 
 if __name__ == "__main__":
@@ -334,6 +367,10 @@ if __name__ == "__main__":
 
     python fetch-ledger-data.py -v -tag ledger_objects -env local \
     -xh s1.ripple.com -xp 443
+
+    python fetch-ledger-data.py -v -tag ledger_objects -env test \
+    -xh s1.ripple.com -xp 443 \
+    --fluent --fluent_host 0.0.0.0 --fluent_port 25225
     ```
     """
     main()

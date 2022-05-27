@@ -1,4 +1,5 @@
 from typing import Any, Dict, Set
+import copy
 import unittest
 
 class AttributeTypeMappingCollector:
@@ -8,12 +9,12 @@ class AttributeTypeMappingCollector:
     This is used to find the superset of the key to data types.
     Hierarchical keys are flatten with dots ".".
 
-    Example) 
+    Example)
     start_key:
     |_a_key: v
-    |_b_key: 
+    |_b_key:
       |_c-key: []
-    
+
     Results in:
       start_key            : <dict>
       start_key.a_key      : <str>
@@ -22,9 +23,16 @@ class AttributeTypeMappingCollector:
     """
     def __init__(self,
         data_type_mapping: str = None,
+        init_attribute_mapping: Dict[str, Set[str]] = None,
     ):
-        self.attribute_mapping = {}
         self.data_type_mapping = data_type_mapping
+
+        if init_attribute_mapping:
+            self.attribute_mapping = copy.deepcopy(
+                init_attribute_mapping
+            )
+        else:
+            self.attribute_mapping = {}
 
         # setup BigQuery Data Type
         self.bigquery_data_type_mapping = {
@@ -33,7 +41,10 @@ class AttributeTypeMappingCollector:
             dict: "RECORD",
         }
 
-    def get_mapping(self) -> Dict[str, Any]:
+    def get_keys(self) -> int:
+        return self.attribute_mapping.keys()
+
+    def get_mapping(self) -> Dict[str, Set[str]]:
         return self.attribute_mapping
 
     def _data_type_translation(self,
@@ -41,16 +52,15 @@ class AttributeTypeMappingCollector:
     ):
         if self.data_type_mapping == "google":
             return self.bigquery_data_type_mapping.get(
-                data_type, 
+                data_type,
                 "NOT FOUND:[{}]".format(data_type),
             )
 
         return data_type
 
-
     def collect_attributes(self,
         data_dict: Dict[str, Any],
-    ):   
+    ):
         self._collect_attributes(
             prefix = "",
             data_dict = data_dict,
@@ -97,7 +107,7 @@ class AttributeTypeMappingCollector:
         for k in sorted(self.attribute_mapping.keys()):
             v = self.attribute_mapping.get(k)
             print("{key}{delimeter}{value}".format(
-                key = k, 
+                key = k,
                 delimeter = delimeter,
                 value = v,
             ))

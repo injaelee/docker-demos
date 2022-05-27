@@ -317,6 +317,7 @@ class XRPLObjectSchema:
     SCHEMA = {
         "_ExecutionID": {str}, # to note custom export execution
         "_LedgerIndex": {int}, # denormalized to note which ledger index 
+        "_Sequence": {int}, # record sequence to find out missing records
         "Account": {str},
         "AccountTxnID": {str},
         "Amendments": {list},
