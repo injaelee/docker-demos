@@ -1,9 +1,11 @@
+import argparse
 from collections import namedtuple
 from google.cloud import bigquery
-from schema import XRPLObjectSchema
+from schema import XRPLObjectSchema, XRPLTransactionSchema
 from typing import Dict, List, Set
 import datetime
 import logging
+import sys
 import unittest
 
 IntermediateNode = namedtuple("IntermediateNode", ["prefix", "name", "obj"])
@@ -88,7 +90,7 @@ class BigQuerySchemaBottomUpBuilder:
         obj_stack: List[IntermediateNode] = []
 
         # build the object stack
-        for full_key in sorted(schema_dict):
+        for full_key in sorted(schema_dict.keys()):
             tokens = full_key.split(".")
 
             # prefix key is the canonical name without the key
@@ -164,25 +166,59 @@ class SchemaBuilderTest(unittest.TestCase):
         bg_schema_fields = bg_query_schema_builder.build(
             schema_dict = schema,
         )
-        for f in bg_schema_fields:
-            print(f)
 
-    
-    def test_google_with_schemapy(self):
-        bg_query_schema_builder = BigQuerySchemaBottomUpBuilder()
-        bg_schema_fields = bg_query_schema_builder.build(
-            schema_dict = XRPLObjectSchema.SCHEMA
-        )
-        for f in bg_schema_fields:
-            print(f)
+        expected_schema_fields = [
+            bigquery.SchemaField("ListStrings", "STRING", mode = "REPEATED"),
+            bigquery.SchemaField("Amount", "RECORD", mode = "NULLABLE", fields = [
+                bigquery.SchemaField("value", "STRING", mode = "NULLABLE"),
+                bigquery.SchemaField("objs", "RECORD", mode = "REPEATED", fields = [
+                    bigquery.SchemaField("value", "INTEGER", mode = "NULLABLE"),
+                    bigquery.SchemaField("name", "STRING", mode = "NULLABLE"),
+                ]),
+                bigquery.SchemaField("issuer", "STRING", mode = "NULLABLE"),
+                bigquery.SchemaField("currency", "STRING", mode = "NULLABLE"),
+            ]),
+            bigquery.SchemaField("Amendment", "STRING", mode = "NULLABLE"),
+            bigquery.SchemaField("Account", "STRING", mode = "NULLABLE")
+        ]
+
+        # recursive function to determine equal content and structure
+        def equal_schema_fields(
+            assertion: unittest.TestCase,
+            expected_fields: List[bigquery.SchemaField],
+            actual_fields: List[bigquery.SchemaField],
+        ) -> bool:
+            assertion.assertEqual(len(expected_fields), len(actual_fields))
+            for expected_field in expected_fields:
+                matched = False
+                for actual_field in actual_fields:
+                    if expected_field.name == actual_field.name:
+                        matched = True
+                        assertion.assertEqual(
+                            expected_field.field_type,
+                            actual_field.field_type,
+                        )
+                        equal_schema_fields(
+                            assertion,
+                            expected_field.fields,
+                            actual_field.fields,
+                        )
+                        break
+                assertion.assertTrue(
+                    matched, "Missing field in actual fields: %s" % expected_field)
+
+        equal_schema_fields(self, expected_schema_fields, bg_schema_fields)
 
 
 def build_bigquery_table(
+    project_name: str,
+    dataset_name: str,
     table_name: str,
+    schema: Dict[str, Set[str]],
 ):
     bg_query_schema_builder = BigQuerySchemaBottomUpBuilder()
     bg_schema_fields = bg_query_schema_builder.build(
-        schema_dict = XRPLObjectSchema.SCHEMA
+        schema_dict = schema,
     )
 
     bq_table_builder = BigQueryTableBuilder()
@@ -193,8 +229,68 @@ def build_bigquery_table(
         schema = bg_schema_fields,
     )
 
+def print_schema(
+    schema: Dict[str, Set[str]],
+):
+    bg_query_schema_builder = BigQuerySchemaBottomUpBuilder()
+    bg_schema_fields = bg_query_schema_builder.build(
+        schema_dict = schema,
+    )
+    for f in bg_schema_fields:
+        print(f)
+
 
 if __name__ == "__main__":
-    #unittest.main()
-    build_bigquery_table(table_name = "xrpl_ledger_objects")
-    # build_biguqery_schema()
+    arg_parser = argparse.ArgumentParser()
+
+    arg_parser.add_argument(
+        "-p", "--project",
+        help = "specify the project name",
+        type = str,
+        default = "ripplex-ilee-pipeline",
+    )
+    arg_parser.add_argument(
+        "-d", "--dataset",
+        help = "specify dataset name",
+        type = str,
+        default = "raw_xrpl_data",
+    )
+    arg_parser.add_argument(
+        "-t", "--table",
+        help = "specify the table name",
+        type = str,
+        default = "xrpl_ledger_objects",
+    )
+    arg_parser.add_argument(
+        "-s", "--schema",
+        help = "specify the schema type",
+        type = str,
+        choices=["", "ledger_object", "transactions"],
+        default = "",
+    )
+    arg_parser.add_argument(
+        "-ps", "--print",
+        help = "print the specified schema",
+        action="store_true",
+    )
+
+    cli_args = arg_parser.parse_args()
+
+    schema_dict = {
+        "ledger_object": XRPLObjectSchema.SCHEMA,
+        "transactions": XRPLTransactionSchema.SCHEMA,
+    }
+
+    schema = schema_dict.get(cli_args.schema)
+    if not schema:
+        sys.exit("[ERROR] Specify a valid schema. Given '%s'." % cli_args.schema)
+
+    if cli_args.print:
+        print_schema(schema)
+    else:
+        build_bigquery_table(
+            project_name = cli_args.project,
+            dataset_name = cli_args.dataset,
+            table_name = cli_args.table,
+            schema = schema,
+        )
