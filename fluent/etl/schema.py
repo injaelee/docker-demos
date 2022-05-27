@@ -315,13 +315,13 @@ class XRPLTransactionSchema:
 
 class XRPLObjectSchema:
     SCHEMA = {
-        "_ExecutionID": {str}, # to note custom export execution
-        "_LedgerIndex": {int}, # denormalized to note which ledger index 
-        "_Sequence": {int}, # record sequence to find out missing records
         "Account": {str},
         "AccountTxnID": {str},
         "Amendments": {list},
-        "Amount": {str},
+        "Amount": {str, dict},
+        "Amount.currency": {str},
+        "Amount.issuer": {str},
+        "Amount.value": {str},
         "Authorize": {str},
         "Balance": {str, dict},
         "Balance.currency": {str},
@@ -330,6 +330,7 @@ class XRPLObjectSchema:
         "BaseFee": {str},
         "BookDirectory": {str},
         "BookNode": {str},
+        "BurnedNFTokens": {int},
         "CancelAfter": {int},
         "Condition": {str},
         "Destination": {str},
@@ -363,9 +364,19 @@ class XRPLObjectSchema:
         "LowQualityIn": {int},
         "LowQualityOut": {int},
         "MessageKey": {str},
+        "MintedNFTokens": {int},
+        "NFTokenID": {str},
+        "NFTokenMinter": {str},
+        "NFTokenOfferNode": {str},
+        "NFTokens": {list},
+        "NFTokens.NFToken": {dict},
+        "NFTokens.NFToken.NFTokenID": {str},
+        "NFTokens.NFToken.URI": {str},
+        "NextPageMin": {str},
         "Owner": {str},
         "OwnerCount": {int},
         "OwnerNode": {str},
+        "PreviousPageMin": {str},
         "PreviousTxnID": {str},
         "PreviousTxnLgrSeq": {int},
         "PublicKey": {str},
@@ -404,5 +415,8 @@ class XRPLObjectSchema:
         "TicketSequence": {int},
         "TransferRate": {int},
         "WalletLocator": {str},
+        "_ExecutionID": {str},
+        "_LedgerIndex": {int},
+        "_Sequence": {int},
         "index": {str},
     }

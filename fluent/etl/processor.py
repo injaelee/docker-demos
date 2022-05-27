@@ -1,6 +1,6 @@
 from collections import namedtuple
 from schema import XRPLObjectSchema
-from typing import Dict, Any
+from typing import Any, Dict, List
 import copy
 import logging
 import unittest
@@ -270,6 +270,20 @@ class STDOUTIngestor(Ingestor):
     ) -> bool:
         print(data_entry)
         return True
+
+
+class AggregateIngestor(Ingestor):
+    def __init__(self,
+        ingestors: List[Ingestor],
+    ):
+        self.ingestors = ingestors
+
+    def ingest(self,
+        data_entry: Dict[str, Any],
+    ) -> bool:
+        r = True
+        for ingestor in self.ingestors:
+            r = r and ingestor.ingest(data_entry)
 
 
 class ProcessorUnitTests(unittest.TestCase):

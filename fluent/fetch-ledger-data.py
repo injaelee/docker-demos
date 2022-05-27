@@ -4,7 +4,7 @@ from attributes.collector import AttributeTypeMappingCollector
 from collections import namedtuple
 from etl.processor import \
     DictEntryProcessor, ETLTemplateDictEntryProcessor, GenericValidator, XRPLObjectTransformer, \
-    STDOUTIngestor, FluentIngestor
+    AggregateIngestor, STDOUTIngestor, FluentIngestor
 from etl.schema import XRPLObjectSchema
 from fluent import sender
 from typing import Any, Dict, List, Set, Union
@@ -23,17 +23,18 @@ import time
 
 logger = logging.getLogger(__name__)
 done_signal = namedtuple("done_signal", ['ledger_index'])
-
+BaseURL = namedtuple("BaseURL", ["protocol", "host", "port"])
 
 class XRPLedgerObjectFetcher:
     def __init__(self,
-        url: str,
+        wss_host: str,
+        wss_port: int,
         processor: DictEntryProcessor,
         is_attach_execution_id: bool = True,
         is_attach_seq: bool = True,
         ledger_index: Union[int,str] = "current",
     ):
-        self.url = url
+        self.url = "wss://%s:%d/" % (wss_host, wss_port)
         self.processor = processor
         self.is_attach_execution_id = is_attach_execution_id
         self.is_attach_seq = is_attach_seq
@@ -126,7 +127,11 @@ class DataAttributeMappingEntryProcessor(DictEntryProcessor):
 
         # print when a difference is detected
         if self.latest_key_count != len(self.att_mapping_collector.get_keys()):
+            self.latest_key_count = len(self.att_mapping_collector.get_keys())
+            print("-----")
             self.att_mapping_collector.print()
+            print("-----")
+            sys.stdout.flush()
 
     def done(self, **kwargs):
         # do none
@@ -182,23 +187,31 @@ class DequeueProcessorTemplate():
 
 
 def start_processors(
-    wss_url: str,
+    wss_base_url: BaseURL,
+    rest_base_url: BaseURL,
+    is_stdout_ingestor: bool,
     fluent_sender: sender.FluentSender,
     fluent_tag_name: str,
     buffer_size: int,
 ):
+    ingestors = []
 
     # if fluent sender is specified
     # forward outputs to fluent
     if fluent_sender:
-        ingestor = FluentIngestor(
+        ingestors.append(FluentIngestor(
             fluent_sender = fluent_sender,
             tag_name = fluent_tag_name,
-        )
-    else:
+        ))
+    
+    if is_stdout_ingestor:
         # otherwise, output to STDOUT
-        ingestor = STDOUTIngestor()
+        ingestors.append(STDOUTIngestor())
 
+    if len(ingestors) == 1:
+        ingestor = ingestors[0]
+    else:
+        ingestor = AggregateIngestor(ingestors = ingestors)
 
     type_mapping_collector = AttributeTypeMappingCollector()
     att_mapping_entry_processor = DataAttributeMappingEntryProcessor(
@@ -223,9 +236,14 @@ def start_processors(
     enqueue_fetch_processor = EnqueueDictEntryProcessor(entry_queue = q)
 
     xrpl_fetcher = XRPLedgerObjectFetcher(
-        url = wss_url,
+        wss_host = wss_base_url.host,
+        wss_port = wss_base_url.port,
         processor = enqueue_fetch_processor,
-        ledger_index = start_ledger_sequence(),
+        ledger_index = start_ledger_sequence(
+            xrpl_protocol = rest_base_url.protocol,
+            xrpl_host = rest_base_url.host,
+            xrpl_port = rest_base_url.port,
+        ),
     )
     fetcher_thread = threading.Thread(
         target = xrpl_fetcher.start,
@@ -248,8 +266,12 @@ def start_processors(
     processor_thread.join()
 
 
-def start_ledger_sequence() -> int:
-    client = JsonRpcClient("https://s2.ripple.com:51234/")
+def start_ledger_sequence(
+    xrpl_protocol: str = "https",
+    xrpl_host: str = "s2.ripple.com",
+    xrpl_port: int = 51234,
+) -> int:
+    client = JsonRpcClient(f"{xrpl_protocol}://{xrpl_host}:{xrpl_port}/")
     return get_latest_validated_ledger_sequence(client) - 1
 
 
@@ -263,6 +285,11 @@ def setup_stdout_logging():
 def main():
     arg_parser = argparse.ArgumentParser()
 
+    arg_parser.add_argument(
+        "-si", "--stdoutingest",
+        help = "flag to turn on ingestor",
+        action="store_true",
+    )
     arg_parser.add_argument(
         "-f", "--fluent",
         help = "flag to turn on Fluent output",
@@ -293,8 +320,28 @@ def main():
         "-xp",
         "--xrpl_port",
         help = "specify the rippled websocket port",
+        type = int,
+        default = 443,
+    )
+    arg_parser.add_argument(
+        "-rxs",
+        "--rest_xrpl_secure",
+        help = "specify whether to use https",
+        action="store_true",
+    )
+    arg_parser.add_argument(
+        "-rxh",
+        "--rest_xrpl_host",
+        help = "specify the rippled websocket host",
         type = str,
-        default = "443",
+        default = "s1.ripple.com",
+    )
+    arg_parser.add_argument(
+        "-rxp",
+        "--rest_xrpl_port",
+        help = "specify the rippled websocket port",
+        type = int,
+        default = 51234,
     )
     arg_parser.add_argument(
         "-v",
@@ -335,11 +382,13 @@ def main():
             port = cli_args.fluent_port,
         )
 
-    wss_url = f"wss://%s:%s/" % (cli_args.xrpl_host, cli_args.xrpl_port)
+    wss_url = "wss://%s:%d/" % (cli_args.xrpl_host, cli_args.xrpl_port)
+    rest_url = "http://%s:%d/" % (cli_args.rest_xrpl_host, cli_args.rest_xrpl_port)
 
     logger.info(
-        "Starting processors with WSS '%s' and On?[%r] FluentSender[%s:%d](env:'%s':tag:'%s') ; buffer rows:[%d]",
+        "Starting processors with WSS '%s' REST '%s' and On?[%r] FluentSender[%s:%d](env:'%s':tag:'%s') ; buffer rows:[%d]",
         wss_url,
+        rest_url,
         cli_args.fluent,
         cli_args.fluent_host,
         cli_args.fluent_port,
@@ -351,7 +400,17 @@ def main():
     time.sleep(2)
 
     start_processors(
-        wss_url = wss_url,
+        wss_base_url = BaseURL(
+            "wss", 
+            cli_args.xrpl_host, 
+            cli_args.xrpl_port,
+        ),
+        rest_base_url = BaseURL(
+            "https" if cli_args.rest_xrpl_secure else "http",
+            cli_args.rest_xrpl_host, 
+            cli_args.rest_xrpl_port,
+        ),
+        is_stdout_ingestor = cli_args.stdoutingest,
         fluent_sender = fluent_sender,
         fluent_tag_name = cli_args.tagname,
         buffer_size = cli_args.buffer,
@@ -367,6 +426,10 @@ if __name__ == "__main__":
 
     python fetch-ledger-data.py -v -tag ledger_objects -env local \
     -xh s1.ripple.com -xp 443
+
+    python fetch-ledger-data.py -v -tag ledger_objects -env local \
+    -xh xls20-sandbox.rippletest.net -xp 51233 \
+    -rxh xls20-sandbox.rippletest.net -rxp 51234 \
 
     python fetch-ledger-data.py -v -tag ledger_objects -env test \
     -xh s1.ripple.com -xp 443 \
