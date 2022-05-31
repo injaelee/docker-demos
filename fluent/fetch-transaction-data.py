@@ -121,6 +121,57 @@ class ShardedLedgerIndexIterator:
         raise StopIteration
 
 
+class XRPLedgerFetcherRPC:
+    def __init__(self,
+        url: str,
+    ):
+        self.url = url
+
+    def start_fetch(self,
+        next_ledger_index_itr: ShardedLedgerIndexIterator,
+        processors: List[FetchProcessor],
+    ):
+        logger.info("[XRPLedgerFetcherRPC] Start fetching.")
+
+        client = JsonRpcClient(self.url)
+
+        for current_ledger_index in next_ledger_index_itr:
+            retry = 5    
+            while retry > 0:
+                itr_num = 0
+            
+                req = Ledger(
+                    ledger_index = current_ledger_index,
+                    transactions = True,
+                    expand = True,
+                )
+
+                itr_num += 1
+                response = client.request(req)
+                if not response.is_successful():
+                    retry -= 1
+                    logger.error(f"[{itr_num}] Received message has failure. Sleeping.")
+                    time.sleep(10)
+                    continue
+
+                message = response.result
+
+                txns = message.get("ledger").get("transactions")
+                ledger_index = message.get("ledger_index")
+
+                for txn in txns:
+                    for proc in processors:
+                        proc.process(
+                            txn,
+                            ledger_index = ledger_index,
+                        )
+
+                # break from the retry loop
+                break
+
+        logger.info("[XRPLedgerFetcherRPC] Finished exection.")
+
+
 class XRPLedgerFetcher:
     def __init__(self,
         url: str,
@@ -222,7 +273,7 @@ def single_threaded_start():
     pymnt_fetch_processor = PaymentFetchProcessor(output_collector)
     fetch_processors = [pymnt_fetch_processor]
 
-    xrpl_fetcher = XRPLedgerFetcher(url = "wss://s2.ripple.com/")
+    xrpl_fetcher = XRPLedgerFetcherRPC(url = "https://s2.ripple.com:51234/") #(url = "wss://s2.ripple.com/")
     xrpl_fetcher.start_fetch(
         ledger_index_iter,
         fetch_processors,
@@ -248,7 +299,7 @@ def start_processors():
             shard_index = i,
             shard_size = shard_size,
         )
-        xrpl_fetcher = XRPLedgerFetcher(url = "wss://s2.ripple.com/")
+        xrpl_fetcher = XRPLedgerFetcherRPC(url = "https://s2.ripple.com:51234/") #(url = "wss://s2.ripple.com/")
         fetcher_thread = threading.Thread(
             target = xrpl_fetcher.start_fetch,
             args = (ledger_index_iter, fetch_processors,))
