@@ -110,6 +110,8 @@ class AsyncXRPLedgerObjectFetcher:
 
                 # process the ledger obj's
                 for ledger_obj in list_of_ledger_objs:
+                    ledger_obj['_LedgerIndex'] = int(ledger_index)
+
                     if self.is_attach_execution_id:
                         ledger_obj['_ExecutionID'] = self.execution_id
 
