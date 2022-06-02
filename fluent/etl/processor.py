@@ -8,7 +8,7 @@ from fluent import sender
 
 
 logger = logging.getLogger(__name__)
-
+BaseURL = namedtuple("BaseURL", ["protocol", "host", "port"])
 
 class Validator:
 
