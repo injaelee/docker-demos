@@ -2,10 +2,11 @@
 from xrpl.clients import JsonRpcClient
 from xrpl.wallet import generate_faucet_wallet
 from xrpl.models.amounts.issued_currency_amount import IssuedCurrencyAmount
+from xrpl.models.requests.book_offers import BookOffers
 from xrpl.models.transactions import OfferCreate
 import xrpl
 from collections import namedtuple
-from typing import Union
+from typing import Dict, Union
 
 # ------------------------------------------------------------------------------------------------- #
 #                                                                                                   #
@@ -50,6 +51,21 @@ class TokenAmountBuilder:
     TOKEN_ISSUER_MAPPING = {
         "IJL": "rJ248EQck3oH1bQWRWfpZugoWSgTPgJW5V",
     }
+
+    @classmethod
+    def build_token(cls,
+        token_name: str,
+    ) -> Dict[str, str]:
+        if token_name == "XRP":
+            return {
+                "currency": "XRP",
+            }
+
+        issuer = cls.TOKEN_ISSUER_MAPPING.get(token_name)
+        return {
+            "currency": token_name,
+            "issuer": issuer,
+        }
 
     @classmethod
     def build_amount(cls,
@@ -327,6 +343,33 @@ class DEXShell(cmd.Cmd):
         )
         print(response)
 
+    def do_order_book(self,
+        arg: str,
+    ):
+        pair_tokens = arg.split(":")
+        book_offers_req = BookOffers(
+            taker_gets = TokenAmountBuilder.build_token(pair_tokens[0]),
+            taker_pays = TokenAmountBuilder.build_token(pair_tokens[1]),
+        )
+        resp = self.xrpl_client.request(book_offers_req)
+
+        if not resp.is_successful():
+            print(f"[order_book] error calling the order book for '{arg}' pair.")
+            return
+
+        def __sep(order):
+            if type(order) == dict:
+                return order.get("currency"), int(order.get("value"))
+            return "XRP", int(order) / 1_000_000.
+
+        for offer in resp.result.get("offers"):
+            gets_token, gets_value = __sep(offer.get("TakerGets"))
+            pays_token, pays_value = __sep(offer.get("TakerPays"))
+            quality = offer.get("quality")
+            price = pays_value / gets_value
+            print(f"Priced {pays_token} per {gets_token}: {gets_value} {gets_token} @ {price}")
+
+
     def do_quit(self,
         arg: str,
     ):
@@ -341,4 +384,21 @@ def main():
 
 
 if __name__ == "__main__":
+    """    
+    build_wallet hot_wallet sEdVKkB9QaU7AZGYimWRiUsgZj6SrzM 28045792
+    build_wallet cold_wallet sEd7R6eYgTxZ9zbPSUkG8eVLjSFnujQ 28045807
+    build_wallet startup_wallet sEdSRcN7VznANrwooNxqneNu5oyarnr 28046821
+
+    -- do this once
+    --
+    setup_cold_wallet cold_wallet www.example.com
+    setup_hot_wallet hot_wallet
+
+
+    setup_token IJL 10000000 hot_wallet cold_wallet
+    issue_token IJL 100 cold_wallet hot_wallet
+    offer_create hot_wallet 15:IJL 20:XRP
+    offer_create startup_wallet 10:XRP 10:IJL
+
+    """
     main()
