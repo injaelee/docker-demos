@@ -74,7 +74,7 @@ class TokenAmountBuilder:
     ) -> Union[str,IssuedCurrencyAmount]:
 
         if token_name == "XRP":
-            return token_amount
+            return str(int(token_amount) * 1_000_000)
 
         issuer = cls.TOKEN_ISSUER_MAPPING.get(token_name)
         return IssuedCurrencyAmount(
@@ -125,19 +125,20 @@ class DEXShell(cmd.Cmd):
         print(f"[Setting Wallet '{name}']:\n{wallet}")
         self.named_wallet[name] = wallet
 
-    def do_get_wallet_info(self,
+    def do_wallet_info(self,
         arg: str,
     ):
-        print(f"[get_wallet_info] arg: '{arg}'")
+        cmd_name = "wallet_info"
+        print(f"[{cmd_name}] arg: '{arg}'")
         wallet_name = arg
-        wallet = self.named_wallet[wallet_name]
+        wallet = self.named_wallet.get(wallet_name)
 
         if wallet:
             print(wallet)
             print(f"seed: {wallet.seed}")
             print(f"seq : {wallet.sequence}")
         else:
-            print(f"No wallet found with name '{wallet_name}'.")
+            print(f"[{cmd_name}] no wallet found with name '{wallet_name}'.")
 
     def do_setup_cold_wallet(self,
         arg: str,
@@ -304,10 +305,79 @@ class DEXShell(cmd.Cmd):
         )
         print(response)
 
+    def do_trade_order(self,
+        arg: str,
+    ):
+        """ trader_order [wallet_name] [order] [qtyA] [tokenA] @ [qtyB] [tokenB] (per token price)"""
+        """ 
+            Examples:
+            trader_order walletName sell 100 IJL @ 12 XRP --> Taker Gets 1200 XRP ; Pays  100 IJL
+            trader_order walletName buy  100 IJL @ 12 XRP --> Taker Gets  100 IJL ; Pays 1200 XRP
+        """
+        arg_values = [entry for entry in arg.split()]
+        if len(arg_values) != 7:
+            print(f"[trade_order] Missing arguments. Got {arg_values}")
+            return
+
+        wallet_name, order_type, qty_A, token_A, _, price_B_per_A, token_B = arg_values
+        print(arg_values)
+        """
+            When we're selling, the selling token is the
+            one that the taker gets.
+            When we're buying, the buying token is the one
+            that the taker pays.
+        """
+        if order_type == "sell":
+            taker_gets_token = token_A
+            taker_gets_qty = int(qty_A)
+            taker_pays_token = token_B
+            taker_pays_qty = taker_gets_qty * float(price_B_per_A)
+        elif order_type == "buy":
+            taker_gets_token = token_B
+            taker_gets_qty = int(qty_A) * float(price_B_per_A)
+            taker_pays_token = token_A
+            taker_pays_qty = int(qty_A)
+        else:
+            print(f"[trader_order] Order type '{order_type}' does not exist.")
+            return
+
+        print(f"Taker Gets: [{taker_gets_token}] {taker_gets_qty}")
+        print(f"Taker Pays: [{taker_pays_token}] {taker_pays_qty}")
+
+        account_wallet = self.named_wallet.get(wallet_name)
+        import pdb; pdb.set_trace()
+        if not account_wallet:
+            print(f"[trade_order] Account for wallet '{wallet_name}' does not exist.")
+            return
+
+        offer_create_tx = OfferCreate(
+            account = account_wallet.classic_address,
+            taker_gets = TokenAmountBuilder.build_amount(
+                token_name = taker_gets_token,
+                token_amount = taker_gets_qty,
+            ),
+            taker_pays = TokenAmountBuilder.build_amount(
+                token_name = taker_pays_token,
+                token_amount = taker_gets_qty,
+            ),
+        )
+        offer_prepared = xrpl.transaction.safe_sign_and_autofill_transaction(
+            transaction = offer_create_tx,
+            wallet = account_wallet,
+            client = self.xrpl_client,
+        )
+        response = xrpl.transaction.send_reliable_submission(
+            offer_prepared,
+            self.xrpl_client,
+        )
+        print(response)        
+
+
     def do_offer_create(self,
         arg: str,
     ):
         """offer_create [wallet_name] [sell_quantity]:[sell_token_name] [buy_quantity]:[buy_token_name]"""
+        
         arg_values = [entry for entry in arg.split()]
 
         if len(arg_values) != 3:
@@ -367,8 +437,7 @@ class DEXShell(cmd.Cmd):
             pays_token, pays_value = __sep(offer.get("TakerPays"))
             quality = offer.get("quality")
             price = pays_value / gets_value
-            print(f"Priced {pays_token} per {gets_token}: {gets_value} {gets_token} @ {price}")
-
+            print(f"{gets_value} {gets_token} @ {price} {pays_token}")
 
     def do_quit(self,
         arg: str,
@@ -388,12 +457,11 @@ if __name__ == "__main__":
     build_wallet hot_wallet sEdVKkB9QaU7AZGYimWRiUsgZj6SrzM 28045792
     build_wallet cold_wallet sEd7R6eYgTxZ9zbPSUkG8eVLjSFnujQ 28045807
     build_wallet startup_wallet sEdSRcN7VznANrwooNxqneNu5oyarnr 28046821
-
+    build_wallet arb_wallet_i sEdSA2cYSe6etuaisebmssawjdj5sQ8 28601057
     -- do this once
     --
     setup_cold_wallet cold_wallet www.example.com
     setup_hot_wallet hot_wallet
-
 
     setup_token IJL 10000000 hot_wallet cold_wallet
     issue_token IJL 100 cold_wallet hot_wallet
