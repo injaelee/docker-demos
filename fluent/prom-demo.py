@@ -32,6 +32,9 @@ class TimerExecutionMonitor:
             status = "failed"
         self.stop_gauge.labels(self.execution_env, status).set_to_current_time()
 
+# 'rx-prom-server' is an alias in my /etc/hosts
+# since I do not want to make the actual hostname publicly known
+#
 execution_env = "test"
 push_gateway_url = "rx-prom-server:9091"
 
