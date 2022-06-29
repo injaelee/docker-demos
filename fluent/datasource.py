@@ -5,6 +5,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Union
 import logging
 from xrpl.asyncio.clients.async_websocket_client import AsyncWebsocketClient
 from xrpl.models.requests.ledger import Ledger
+from xrpl.models.requests.book_offers import BookOffers
 from xrpl.models.currencies import XRP, IssuedCurrency
 import sys
 import traceback
@@ -25,7 +26,7 @@ class FetchAsyncProcessor:
         pass
 
 
-class ExtractTokenPairsAsyncProcessor:
+class ExtractTokenPairsAsyncProcessor(FetchAsyncProcessor):
     def __init__(self,
         aqueue: asyncio.Queue,
     ):
@@ -115,6 +116,15 @@ class ExtractTokenPairsAsyncProcessor:
         logger.info("[ExtractTokenPairsAsyncProcessor] Done iteration.")
 
 
+class ForwardBookOffersAsyncProcessor(FetchAsyncProcessor):
+    async def process(self,
+        entry: Dict[str, Any]
+    ):
+        logger.info("[ForwardBookOffersAsyncProcessor] Start iteration")
+        logger.info(entry)
+        logger.info("[ForwardBookOffersAsyncProcessor] Done iteration")
+
+
 class LedgerIndexAsyncIterator:
     def __init__(self,
         aqueue: asyncio.Queue,
@@ -202,9 +212,18 @@ class BookOfferRequestExecutioner:
     async def iterate_request(self,
         async_websocket_client: AsyncWebsocketClient,
     ):
+        try:
+            await self._iterate_request(async_websocket_client)
+        except Exception:
+            traceback.print_exc()
+
+    async def _iterate_request(self,
+        async_websocket_client: AsyncWebsocketClient,
+    ):
+        import pdb; pdb.set_trace()
         while True:
             # bookoffer_req_queue
-            req = await bookoffer_req_queue.get()
+            req = await self.bookoffer_req_queue.get()
             if type(req) != BookOfferRequest:
                 logger.warn(
                     "expected 'BookOfferReqeuest' but encountered: '%s'",
@@ -218,15 +237,13 @@ class BookOfferRequestExecutioner:
                 ledger_index = req.ledger_index,
             )
 
-            await req.request(book_offer_request)
+            await async_websocket_client.send(book_offer_request)
 
 
 async def amain():
     url = "wss://s1.ripple.com"
 
     bookoffer_req_queue = asyncio.Queue()
-
-
     ledger_index_queue = asyncio.Queue()
     ledger_index_queue.put_nowait(72650384)
 
@@ -248,13 +265,15 @@ async def amain():
         )
     )
 
-    bookoffer_req_queue = asyncio.Queue()
     bookoffer_request_executioner = BookOfferRequestExecutioner(
         bookoffer_req_queue = bookoffer_req_queue,
     )
+    forward_bookoffers_processor = ForwardBookOffersAsyncProcessor()
     async_bookoffer_fetcher = XRPLAsyncFetcher(
         url = url,
-        processors = [],
+        processors = [
+            forward_bookoffers_processor,
+        ],
     )
     bookoffer_fetcher_task = asyncio.create_task(
         async_bookoffer_fetcher.astart(
@@ -268,4 +287,7 @@ async def amain():
 
 
 if __name__ == "__main__":
-    asyncio.run(amain())
+    try:
+        asyncio.run(amain())
+    except KeyboardInterrupt:
+        logger.info("exiting.")
