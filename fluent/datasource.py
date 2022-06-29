@@ -1,11 +1,13 @@
 import asyncio
 import collections
+import cuid
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Union
 import logging
 from xrpl.asyncio.clients.async_websocket_client import AsyncWebsocketClient
 from xrpl.models.requests.ledger import Ledger
 from xrpl.models.currencies import XRP, IssuedCurrency
 import sys
+import traceback
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -35,7 +37,7 @@ class ExtractTokenPairsAsyncProcessor:
         try:
             await self._process(entry)
         except Exception as exp:
-            print(exp)
+            traceback.print_exc()
 
     async def _process(self,
         entry: Dict[str, Any],
@@ -57,14 +59,16 @@ class ExtractTokenPairsAsyncProcessor:
                 return XRP()
 
             amt = IssuedCurrency(
-                currency = entry.get("currency"),
-                issuer = entry.get("issuer"),
+                currency = value.get("currency"),
+                issuer = value.get("issuer"),
             )
 
             if amt.currency is None or amt.issuer is None:
                 return None
 
             return amt
+
+        pair_tuple_set = set()
 
         for txn in transactions:
 
@@ -90,7 +94,12 @@ class ExtractTokenPairsAsyncProcessor:
                 taker_gets_currency = build_currency(taker_gets)
                 taker_pays_currency = build_currency(taker_pays)
 
-                import pdb; pdb.set_trace()
+                pair_tuple_set.add((
+                    taker_gets_currency,
+                    taker_pays_currency
+                ))
+
+        for taker_gets_currency, taker_pays_currency in pair_tuple_set:
                 logger.info(
                     "[ExtractTokenPairsAsyncProcessor] Enqueue book offer request: [%s], [%s]",
                     taker_gets_currency,
@@ -113,7 +122,7 @@ class LedgerIndexAsyncIterator:
         self.aq = aqueue
 
     def __aiter__(self):
-        return self    
+        return self
 
     async def __anext__(self):
         idx = await self.aq.get()
@@ -130,20 +139,19 @@ class XRPLAsyncFetcher:
     ):
         self.url = url
         self.processors = processors
+        self.id = cuid.cuid()
 
     async def _consume(self,
         aitr: AsyncIterator,
     ):
         async for entry in aitr:
-            logger.info("[XRPLAsyncFetcher] Consuming.")
             for proc in self.processors:
                 await proc.process(entry)
-            logger.info("[XRPLAsyncFetcher] Done iteration.")
 
     async def astart(self,
         request_execution: Callable[[AsyncWebsocketClient], Awaitable[None]],
     ):
-        logger.info("[XRPLAsyncFetcher] Start fetching.")
+        logger.info("[XRPLAsyncFetcher:%s] Start fetching.", self.id)
         consumption_task = None
         async with AsyncWebsocketClient(self.url) as client:
 
@@ -155,7 +163,7 @@ class XRPLAsyncFetcher:
             await request_execution(
                 async_websocket_client = client,
             )
-        
+
         if consumption_task:
             consumption_task.cancel()
 
@@ -170,7 +178,7 @@ class LedgerIterationExecutioner:
         async_websocket_client: AsyncWebsocketClient,
     ):
         async for current_ledger_index in self.ledger_index_async_iterator:
-            logger.info("[LedgerIterationExecutioner] " + 
+            logger.info("[LedgerIterationExecutioner] " +
                 f"Current ledger index [{current_ledger_index}].")
             req = Ledger(
                 ledger_index = current_ledger_index,
@@ -181,7 +189,7 @@ class LedgerIterationExecutioner:
 
 
 BookOfferRequest = collections.namedtuple(
-    "BookOfferRequest", 
+    "BookOfferRequest",
     ["ledger_index", "taker_gets", "taker_pays"],
 )
 
@@ -191,7 +199,7 @@ class BookOfferRequestExecutioner:
     ):
         self.bookoffer_req_queue = bookoffer_req_queue
 
-    async def iterate_ledger_request(self,
+    async def iterate_request(self,
         async_websocket_client: AsyncWebsocketClient,
     ):
         while True:
@@ -199,7 +207,7 @@ class BookOfferRequestExecutioner:
             req = await bookoffer_req_queue.get()
             if type(req) != BookOfferRequest:
                 logger.warn(
-                    "expected 'BookOfferReqeuest' but encountered: '%s'", 
+                    "expected 'BookOfferReqeuest' but encountered: '%s'",
                     type(req),
                 )
                 continue
@@ -217,11 +225,11 @@ async def amain():
     url = "wss://s1.ripple.com"
 
     bookoffer_req_queue = asyncio.Queue()
-    
+
 
     ledger_index_queue = asyncio.Queue()
     ledger_index_queue.put_nowait(72650384)
-    
+
     ledger_itr = LedgerIndexAsyncIterator(aqueue = ledger_index_queue)
     ledger_request_executioner = LedgerIterationExecutioner(ledger_itr)
 
@@ -234,8 +242,10 @@ async def amain():
             extract_token_pairs_processor,
         ],
     )
-    await async_ledger_fetcher.astart(
-        request_execution = ledger_request_executioner.iterate_ledger_request,
+    ledger_fetcher_task = asyncio.create_task(
+        async_ledger_fetcher.astart(
+            request_execution = ledger_request_executioner.iterate_ledger_request,
+        )
     )
 
     bookoffer_req_queue = asyncio.Queue()
@@ -246,8 +256,14 @@ async def amain():
         url = url,
         processors = [],
     )
-    await async_bookoffer_fetcher.astart(
-        request_execution = bookoffer_request_executioner.iterate_request,
+    bookoffer_fetcher_task = asyncio.create_task(
+        async_bookoffer_fetcher.astart(
+            request_execution = bookoffer_request_executioner.iterate_request,
+        )
+    )
+    await asyncio.gather(
+        *[ledger_fetcher_task, bookoffer_fetcher_task],
+        return_exceptions = True,
     )
 
 
