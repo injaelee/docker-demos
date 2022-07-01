@@ -1,4 +1,5 @@
 import asyncio
+from attributes.collector import AttributeTypeMappingCollector
 import collections
 import cuid
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Union
@@ -9,6 +10,7 @@ from xrpl.models.requests.book_offers import BookOffers
 from xrpl.models.currencies import XRP, IssuedCurrency
 import sys
 import traceback
+from fluent.asyncsender import FluentSender
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -117,12 +119,21 @@ class ExtractTokenPairsAsyncProcessor(FetchAsyncProcessor):
 
 
 class ForwardBookOffersAsyncProcessor(FetchAsyncProcessor):
+    def __init__(self,
+        fluent_sender: FluentSender,
+    ):
+        self.fluent_sender = fluent_sender
+
     async def process(self,
         entry: Dict[str, Any]
     ):
         logger.info("[ForwardBookOffersAsyncProcessor] Start iteration")
-        logger.info(entry)
+
+        for offer in entry.get("result", {}).get("offers", []):
+            self.fluent_sender.emit("bookoffer", offer)
+
         logger.info("[ForwardBookOffersAsyncProcessor] Done iteration")
+        
 
 
 class LedgerIndexAsyncIterator:
@@ -220,7 +231,6 @@ class BookOfferRequestExecutioner:
     async def _iterate_request(self,
         async_websocket_client: AsyncWebsocketClient,
     ):
-        import pdb; pdb.set_trace()
         while True:
             # bookoffer_req_queue
             req = await self.bookoffer_req_queue.get()
@@ -265,10 +275,17 @@ async def amain():
         )
     )
 
+    fluent_sender = FluentSender(
+        "test",
+        host = "0.0.0.0", 
+        port = 25225,
+    )
     bookoffer_request_executioner = BookOfferRequestExecutioner(
         bookoffer_req_queue = bookoffer_req_queue,
     )
-    forward_bookoffers_processor = ForwardBookOffersAsyncProcessor()
+    forward_bookoffers_processor = ForwardBookOffersAsyncProcessor(
+        fluent_sender = fluent_sender,
+    )
     async_bookoffer_fetcher = XRPLAsyncFetcher(
         url = url,
         processors = [
