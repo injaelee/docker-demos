@@ -242,7 +242,7 @@ class TestIterator(unittest.TestCase):
 
 def start_ledger_sequence() -> int:
     client = JsonRpcClient("https://s2.ripple.com:51234/")
-    return 62715437 # get_latest_validated_ledger_sequence(client) - 1
+    return get_latest_validated_ledger_sequence(client) - 1
 
 
 def single_threaded_start():
