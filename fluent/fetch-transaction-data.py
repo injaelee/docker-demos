@@ -1,16 +1,19 @@
 from typing import Any, Dict, List
 from xrpl.clients import WebsocketClient
-from xrpl.models.requests.ledger import Ledger
 from xrpl.clients.json_rpc_client import JsonRpcClient
 from xrpl.ledger import get_latest_validated_ledger_sequence
+from xrpl.models.requests.ledger import Ledger
+import argparse
+import logging
 import queue
+import random
 import threading
 import time
 import unittest
-import logging
-import random
+
 
 logger = logging.getLogger(__name__)
+
 
 class FetchProcessor:
     def __init__(serf,
@@ -24,6 +27,13 @@ class FetchProcessor:
 
 
 class DataCollector:
+    def collect(self,
+        data: str,
+    ):
+        pass
+
+
+class NOOPDataCollector(DataCollector):
     def collect(self,
         data: str,
     ):
@@ -64,8 +74,13 @@ class PaymentFetchProcessor(FetchProcessor):
             for step in path:
                 currency = step.get("currency")
                 issuer = step.get("issuer")
+                account = step.get("account")
 
-                cur = currency + ":" + issuer if issuer else currency
+                if account:
+                    cur = "rippling:" + account
+                else:
+                    cur = currency + ":" + issuer if issuer else currency
+
                 resolved_path.append(cur)
             path_list.append(resolved_path)
         return path_list
@@ -194,6 +209,7 @@ class XRPLedgerFetcherRPC:
                 except Exception as e:
                     retry += 1
                     sleep_time_s = 10 * (1.5) ** retry + random.randrange(2,8)
+                    traceback.print_exc()
                     logger.error(f"[{itr_num}] Received message has failure: {e}")
                     logger.warn(f"Now sleeping for {sleep_time_s} seconds.")
                     time.sleep(sleep_time_s)
@@ -215,59 +231,21 @@ class XRPLStatisticCollector:
         return
 
 
-class TestIterator(unittest.TestCase):
-
-    def test_good(self):
-        shard_index = 1
-        shard_size = 5
-        itr = ShardedLedgerIndexIterator(
-            start_index = 100,
-            shard_index = shard_index,
-            shard_size = shard_size,
-        )
-        for i in itr:
-            self.assertTrue(i % shard_size == shard_index)
-
-    def test_next(self):
-        shard_index = 1
-        shard_size = 5
-        itr = ShardedLedgerIndexIterator(
-            start_index = 10,
-            shard_index = shard_index,
-            shard_size = shard_size,
-        )
-        for i in range(20):
-            print(next(itr))
-
-
 def start_ledger_sequence() -> int:
     client = JsonRpcClient("https://s2.ripple.com:51234/")
     return get_latest_validated_ledger_sequence(client) - 1
 
 
-def single_threaded_start():
-    start_ladger_index = start_ledger_sequence()
-    ledger_index_iter = ShardedLedgerIndexIterator(
-        start_index = start_ladger_index,
-        shard_index = 0,
-        shard_size = 1,
-    )
-    output_collector = STDOutDataCollector()    
-    pymnt_fetch_processor = PaymentFetchProcessor(output_collector)
-    fetch_processors = [pymnt_fetch_processor]
+def start_processors(
+    start_index: int,
+    concurrency_count: int,
+):
+    if start_index == -1:
+        start_ladger_index = start_ledger_sequence()
+    else:
+        start_ladger_index = start_index
 
-    xrpl_fetcher = XRPLedgerFetcherRPC(url = "https://s2.ripple.com:51234/") #(url = "wss://s2.ripple.com/")
-    xrpl_fetcher.start_fetch(
-        ledger_index_iter,
-        fetch_processors,
-    )
-
-
-def start_processors():
-    # 71840265 has the "Paths"
-    # other use 'get_latest_validated_ledger_sequence'
-    start_ladger_index = start_ledger_sequence()
-    shard_size = 5
+    shard_size = concurrency_count
 
     output_queue = queue.Queue()
     output_collector = OutputQueueDataCollector(output_queue)
@@ -297,7 +275,7 @@ def start_processors():
     )
     output_queue_thread.daemon = True
     output_queue_thread.start()
-        
+
     for fetcher_thread in fetcher_threads:
         fetcher_thread.join()
 
@@ -305,7 +283,92 @@ def start_processors():
         time.sleep(1)
 
 
+class ProcessorTests(unittest.TestCase):
+    def test_payment_fetch_processor(self):
+        fetch_processor = PaymentFetchProcessor(NOOPDataCollector())
+        parsed_paths = fetch_processor._parse_paths(
+            paths = [
+                [
+                    {"account": "ACCOUNT_I", "type": 1},
+                    {"account": "ACCOUNT_II", "type": 1},
+                ],
+                [
+                    {"issuer": "ISSUER_I", "currency": "CUR", "type": 1},
+                    {"currency": "XRP", "type": 1},
+                ]
+            ]
+        )
+
+        expected_paths = [
+            ["rippling:ACCOUNT_I", "rippling:ACCOUNT_II"],
+            ["CUR:ISSUER_I", "XRP"]
+        ]
+
+        for actual_path, expected_path in zip(parsed_paths, expected_paths):
+            self.assertEqual(
+                expected_path,
+                actual_path,
+                "paths are not equal",
+            )
+
+    def test_good_iterator(self):
+        shard_index = 1
+        shard_size = 5
+        itr = ShardedLedgerIndexIterator(
+            start_index = 100,
+            shard_index = shard_index,
+            shard_size = shard_size,
+        )
+        for i in itr:
+            self.assertTrue(i % shard_size == shard_index)
+
+    def test_next_iterator(self):
+        shard_index = 1
+        shard_size = 5
+        itr = ShardedLedgerIndexIterator(
+            start_index = 20,
+            shard_index = shard_index,
+            shard_size = shard_size,
+        )
+        expected_values = [16, 11, 6, 1]
+        for actual_value, expected_value in zip(itr, expected_values):
+            self.assertEqual(expected_value, actual_value, "unexpected sharded index")
+
+        # test whether it is the end of the itr
+        with self.assertRaises(StopIteration):
+            next(itr)
+
+
 if __name__ == "__main__":
-    #start_processors()
-    single_threaded_start()
-    #unittest.main()
+    arg_parser = argparse.ArgumentParser()
+
+    arg_parser.add_argument(
+        "-x", "--execute",
+        help = "execute the extraction",
+        action="store_true",
+    )
+    arg_parser.add_argument(
+        "-i", "--start_index",
+        help = "ledger index start (index is iterated backwards toward 0)",\
+        type = int,
+        default = -1, # -1 means start from the latest
+    )
+    arg_parser.add_argument(
+        "-n", "--thread_count",
+        help = "number of threads to use",\
+        type = int,
+        default = 1,
+    )
+
+    cli_args = arg_parser.parse_args()
+
+    # execute the unit test only
+    if not cli_args.execute:
+        unittest.main()
+
+
+    start_processors(
+        start_index = cli_args.start_index,
+        concurrency_count = cli_args.thread_count,
+    )
+
