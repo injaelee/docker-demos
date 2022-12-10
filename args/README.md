@@ -1,5 +1,6 @@
 # Use Case
-- As a user, I want to modify the config parameters.
+- As a user, I want to modify the config parameters in a config file in a Docker image and use it.
+- As a user, I want to be able to pick and choose the config file inside the Docker image to run with the app.
 
 # Demo Objectives
 - Copy config template from image
